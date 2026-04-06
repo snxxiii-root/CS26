@@ -3365,6 +3365,37 @@ EXECUTION_MAP = {
     },
 }
 
+# ── Tool → Package Mapping ────────────────────────────────────────────────────
+# Format: tool_binary → { pkg_manager: package_name }
+# "pip" installs via pip3, "go" installs via go install
+
+TOOL_PACKAGES = {
+    "airmon-ng":    {"apt": "aircrack-ng",   "pacman": "aircrack-ng",  "dnf": "aircrack-ng",  "brew": "aircrack-ng"},
+    "airodump-ng":  {"apt": "aircrack-ng",   "pacman": "aircrack-ng",  "dnf": "aircrack-ng",  "brew": "aircrack-ng"},
+    "aireplay-ng":  {"apt": "aircrack-ng",   "pacman": "aircrack-ng",  "dnf": "aircrack-ng",  "brew": "aircrack-ng"},
+    "aircrack-ng":  {"apt": "aircrack-ng",   "pacman": "aircrack-ng",  "dnf": "aircrack-ng",  "brew": "aircrack-ng"},
+    "wash":         {"apt": "reaver",        "pacman": "reaver",       "dnf": "reaver"},
+    "reaver":       {"apt": "reaver",        "pacman": "reaver",       "dnf": "reaver"},
+    "nmap":         {"apt": "nmap",          "pacman": "nmap",         "dnf": "nmap",         "brew": "nmap"},
+    "sqlmap":       {"apt": "sqlmap",        "pacman": "sqlmap",       "dnf": "sqlmap",       "pip": "sqlmap"},
+    "hashcat":      {"apt": "hashcat",       "pacman": "hashcat",      "dnf": "hashcat",      "brew": "hashcat"},
+    "tcpdump":      {"apt": "tcpdump",       "pacman": "tcpdump",      "dnf": "tcpdump",      "brew": "tcpdump"},
+    "theHarvester": {"apt": "theharvester",  "pacman": "theharvester", "pip": "theHarvester"},
+    "subfinder":    {"go":  "github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest"},
+    "shodan":       {"pip": "shodan"},
+    "python3":      {"apt": "python3",       "pacman": "python",       "dnf": "python3",      "brew": "python3"},
+}
+
+# Install commands per package manager
+PKG_INSTALL_CMDS = {
+    "apt":    "sudo apt-get install -y {pkg}",
+    "pacman": "sudo pacman -S --noconfirm {pkg}",
+    "dnf":    "sudo dnf install -y {pkg}",
+    "brew":   "brew install {pkg}",
+    "pip":    "pip3 install {pkg}",
+    "go":     "go install {pkg}",
+}
+
 # ── Execution Engine Functions ────────────────────────────────────────────────
 
 def check_tool(tool):
@@ -3372,6 +3403,86 @@ def check_tool(tool):
 
 def check_root():
     return os.geteuid() == 0 if hasattr(os, 'geteuid') else False
+
+def detect_pkg_manager():
+    """Detect available system package manager."""
+    for pm in ["apt", "pacman", "dnf", "brew"]:
+        if shutil.which(pm):
+            return pm
+    return None
+
+def install_tool(tool, pkg_manager):
+    """Install a single tool using the appropriate method."""
+    mapping = TOOL_PACKAGES.get(tool, {})
+
+    # Determine install method — prefer system PM, fallback to pip/go
+    method  = None
+    package = None
+
+    if pkg_manager and pkg_manager in mapping:
+        method  = pkg_manager
+        package = mapping[pkg_manager]
+    elif "pip" in mapping:
+        method  = "pip"
+        package = mapping["pip"]
+    elif "go" in mapping:
+        method  = "go"
+        package = mapping["go"]
+
+    if not method:
+        print(f"  {RED}  [✗] No install method known for: {tool}{RESET}")
+        print(f"  {YELLOW}      Install it manually and re-run.{RESET}")
+        return False
+
+    cmd = PKG_INSTALL_CMDS[method].format(pkg=package)
+    print(f"  {CYAN}  [*] Installing {tool} via {method}: {DIM}{cmd}{RESET}")
+    ret = subprocess.run(cmd, shell=True).returncode
+    if ret == 0 and check_tool(tool):
+        print(f"  {GREEN}  [✓] {tool} installed successfully.{RESET}")
+        return True
+    else:
+        print(f"  {RED}  [✗] Failed to install {tool}. Install manually and re-run.{RESET}")
+        return False
+
+def ensure_tools(required):
+    """Check tools, auto-install missing ones with user permission."""
+    missing = [t for t in required if not check_tool(t)]
+    if not missing:
+        return True
+
+    pkg_manager = detect_pkg_manager()
+
+    print(f"\n  {YELLOW}{BOLD}  [!] Missing required tools:{RESET}")
+    for t in missing:
+        mapping   = TOOL_PACKAGES.get(t, {})
+        pm        = pkg_manager if pkg_manager and pkg_manager in mapping else ("pip" if "pip" in mapping else "go" if "go" in mapping else None)
+        pkg_name  = mapping.get(pm, "unknown")
+        pm_label  = pm or "unknown"
+        print(f"  {RED}      • {t:<20}{RESET} {DIM}(package: {pkg_name} via {pm_label}){RESET}")
+
+    print()
+    confirm = input(f"  {YELLOW}  Install missing tools automatically? [Y/n]: {RESET}").strip().lower()
+    if confirm == 'n':
+        print(f"  {YELLOW}  [!] Install them manually and re-run.{RESET}")
+        return False
+
+    # Update apt cache once if needed
+    if pkg_manager == "apt":
+        print(f"  {DIM}  [*] Updating apt cache...{RESET}")
+        subprocess.run("sudo apt-get update -qq", shell=True)
+
+    all_ok = True
+    for tool in missing:
+        ok = install_tool(tool, pkg_manager)
+        if not ok:
+            all_ok = False
+
+    if all_ok:
+        print(f"\n  {GREEN}{BOLD}  [✓] All tools installed. Continuing...\n{RESET}")
+    else:
+        print(f"\n  {YELLOW}  [!] Some tools failed to install — execution may be incomplete.{RESET}")
+
+    return all_ok
 
 def prompt_param(p):
     default = p.get("default", "")
@@ -3419,11 +3530,8 @@ def run_execution(technique_name, exec_conf):
         print(f"  {YELLOW}    Run with: sudo python3 Project101.py \"{technique_name}\" --run{RESET}")
         return
 
-    # Check required tools
-    missing = [t for t in exec_conf.get("requires", []) if not check_tool(t)]
-    if missing:
-        print(f"\n  {RED}[!] Missing required tools: {', '.join(missing)}{RESET}")
-        print(f"  {YELLOW}    Install them and re-run.{RESET}")
+    # Check & auto-install required tools
+    if not ensure_tools(exec_conf.get("requires", [])):
         return
 
     print(f"\n  {YELLOW}{BOLD}  ⚡ EXECUTION MODE — {technique_name}{RESET}")
