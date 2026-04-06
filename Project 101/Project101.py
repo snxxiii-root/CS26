@@ -3609,24 +3609,38 @@ def main():
         show_attack = False
 
     best = matches[0]
+
+    # ── Always show the full guide first ─────────────────────────────────────
+    print(f"\n  {DIM}{'═'*68}{RESET}")
+    print(f"  {CYAN}{BOLD}  📖  GUIDE — {best['name']}{RESET}")
+    print(f"  {DIM}{'═'*68}{RESET}")
     display_technique(best, show_attack=show_attack, show_defense=show_defense)
 
     if len(matches) > 1:
         others = [m["name"] for m in matches[1:4]]
-        print(f"  {DIM}Related techniques: {', '.join(others)}{RESET}")
-        print(f"  {DIM}Search for them directly for more detail.{RESET}\n")
+        print(f"  {DIM}  Related techniques: {', '.join(others)}{RESET}")
+        print(f"  {DIM}  Search for them directly for more detail.{RESET}\n")
 
-    # Execution mode
+    # ── Execution section ─────────────────────────────────────────────────────
+    exec_conf = EXECUTION_MAP.get(best["name"])
+
     if args.run:
-        exec_conf = EXECUTION_MAP.get(best["name"])
+        print(f"\n  {DIM}{'═'*68}{RESET}")
+        print(f"  {GREEN}{BOLD}  ⚡  EXECUTION — {best['name']}{RESET}")
+        print(f"  {DIM}{'═'*68}{RESET}")
         if exec_conf:
             run_execution(best["name"], exec_conf)
         else:
             show_manual_commands(best)
     else:
-        if best["name"] in EXECUTION_MAP:
-            print(f"  {GREEN}  ⚡ This technique supports live execution.{RESET}")
-            print(f"  {DIM}     Add --run to execute it: python3 Project101.py \"{args.query}\" --run{RESET}\n")
+        # Always show execution hint at the bottom
+        print(f"  {DIM}{'─'*68}{RESET}")
+        if exec_conf:
+            print(f"  {GREEN}{BOLD}  ⚡ Live execution available for this technique.{RESET}")
+            print(f"  {DIM}     Run:  python3 Project101.py \"{args.query}\" --run{RESET}")
+        else:
+            print(f"  {YELLOW}  ⚙  No automated executor for this technique — use the guide above with the listed tools.{RESET}")
+        print(f"  {DIM}{'─'*68}{RESET}\n")
 
 
 if __name__ == "__main__":
