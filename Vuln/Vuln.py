@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CVEHunter - Smart CVE Lookup Tool by SNXXIII
+Vuln - Smart CVE Lookup Tool by SNXXIII
 Find CVEs from vague pentester descriptions or pull full detail by CVE ID
 """
 
@@ -232,7 +232,7 @@ def expand_keywords(user_input):
 def fetch_raw(url):
     """Fetch JSON from NVD API."""
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "CVEHunter/1.0"})
+        req = urllib.request.Request(url, headers={"User-Agent": "Vuln/1.0"})
         with urllib.request.urlopen(req, timeout=15) as resp:
             return json.loads(resp.read().decode())
     except urllib.error.URLError as e:
@@ -451,7 +451,7 @@ def print_summary(c):
 
 def save_results(cves, query, filepath):
     with open(filepath, 'a') as f:
-        f.write(f"\nCVEHunter Results\n")
+        f.write(f"\nVuln Results\n")
         f.write(f"Query     : {query}\n")
         f.write(f"Timestamp : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         f.write("=" * 60 + "\n")
@@ -470,7 +470,7 @@ def main():
     print_banner()
 
     parser = argparse.ArgumentParser(
-        description="CVEHunter - Smart CVE lookup from descriptions or CVE IDs",
+        description="Vuln - Smart CVE lookup from descriptions or CVE IDs",
         formatter_class=argparse.RawTextHelpFormatter
     )
     parser.add_argument("query",    nargs="?",
@@ -489,13 +489,13 @@ def main():
         print(f"{CYAN}  Provide a CVE ID for full details, or describe the issue{RESET}")
         print(f"{CYAN}  in plain language to search matching CVEs.\n{RESET}")
         print(f"{YELLOW}  Usage:{RESET}")
-        print(f"    python3 CVEHunter.py \"<CVE-ID or description>\" [options]\n")
+        print(f"    python3 Vuln.py \"<CVE-ID or description>\" [options]\n")
         print(f"{YELLOW}  Examples:{RESET}")
-        print(f"    python3 CVEHunter.py CVE-2021-44228")
-        print(f"    python3 CVEHunter.py \"login page breaks when i add quotes\"")
-        print(f"    python3 CVEHunter.py \"old apache crashing\" --severity HIGH")
-        print(f"    python3 CVEHunter.py \"rce via log4j\" --year 2021 --limit 10")
-        print(f"    python3 CVEHunter.py \"buffer overflow in ssh\" --output results.txt")
+        print(f"    python3 Vuln.py CVE-2021-44228")
+        print(f"    python3 Vuln.py \"login page breaks when i add quotes\"")
+        print(f"    python3 Vuln.py \"old apache crashing\" --severity HIGH")
+        print(f"    python3 Vuln.py \"rce via log4j\" --year 2021 --limit 10")
+        print(f"    python3 Vuln.py \"buffer overflow in ssh\" --output results.txt")
         sys.exit(0)
 
     args = parser.parse_args()
