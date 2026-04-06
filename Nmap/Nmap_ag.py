@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-"""
-SNXXIII - Custom Nmap Scanner Script
-"""
+
 
 import subprocess
 import sys
