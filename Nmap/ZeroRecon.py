@@ -45,7 +45,7 @@ def run_scan(command, target, output_file=None):
             # (when -oN is used, nmap already wrote the file directly)
             if output_file and f'-oN' not in command:
                 with open(output_file, 'w') as f:
-                    f.write(f"SNXXIII Nmap Scan Report\n")
+                    f.write(f"ZeroRecon Scan Report\n")
                     f.write(f"Target  : {target}\n")
                     f.write(f"Time    : {timestamp}\n")
                     f.write(f"Command : {' '.join(command)}\n")
@@ -114,19 +114,19 @@ def print_usage():
     for name, desc in modes:
         print(f"  {GREEN}{name:<12}{RESET} {DIM}{desc}{RESET}")
     print(f"\n{YELLOW}Usage:{RESET}")
-    print(f"  python3 \"NMAP - SNXXIII.py\" <target> --mode <mode> [options]")
+    print(f"  python3 ZeroRecon.py <target> --mode <mode> [options]")
     print(f"\n{YELLOW}Examples:{RESET}")
-    print(f"  python3 \"NMAP - SNXXIII.py\" 192.168.1.1 --mode quick")
-    print(f"  python3 \"NMAP - SNXXIII.py\" 192.168.1.1 --mode aggressive --output scan.txt")
-    print(f"  python3 \"NMAP - SNXXIII.py\" 192.168.1.1 --mode version --ports 1-1000")
-    print(f"  python3 \"NMAP - SNXXIII.py\" 192.168.1.0/24 --mode ping")
-    print(f"  python3 \"NMAP - SNXXIII.py\" 192.168.1.1 --mode custom --flags \"-sS -sV -p 22,80,443\"")
+    print(f"  python3 ZeroRecon.py 192.168.1.1 --mode quick")
+    print(f"  python3 ZeroRecon.py 192.168.1.1 --mode aggressive --output scan.txt")
+    print(f"  python3 ZeroRecon.py 192.168.1.1 --mode version --ports 1-1000")
+    print(f"  python3 ZeroRecon.py 192.168.1.0/24 --mode ping")
+    print(f"  python3 ZeroRecon.py 192.168.1.1 --mode custom --flags \"-sS -sV -p 22,80,443\"")
 
 def main():
     print_banner()
 
     parser = argparse.ArgumentParser(
-        description='SNXXIII - Custom Nmap Scanner',
+        description='ZeroRecon - Network Recon Scanner',
         formatter_class=argparse.RawTextHelpFormatter,
         add_help=True
     )
