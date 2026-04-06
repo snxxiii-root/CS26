@@ -26,6 +26,7 @@ BANNER = r"""
 
 def print_banner():
     print(f"{GREEN}{BANNER}{RESET}")
+    print(f"{CYAN}{BOLD}                    by SNXXIII{RESET}")
     print(f"{DIM}  ----------------------------------------{RESET}")
     print(f"{YELLOW}  ⚠  Only scan systems you own or have permission to test{RESET}")
     print(f"{DIM}  ----------------------------------------{RESET}\n")
